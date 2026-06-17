@@ -12,6 +12,7 @@ import (
 	"github.com/SaisrikarVollala/nebulagate/internal/balancer"
 	"github.com/SaisrikarVollala/nebulagate/internal/config"
 	"github.com/SaisrikarVollala/nebulagate/internal/health"
+	"github.com/SaisrikarVollala/nebulagate/internal/metrics"
 	"github.com/SaisrikarVollala/nebulagate/internal/middleware"
 )
 
@@ -49,10 +50,15 @@ func main() {
 		log.Fatalf("failed to create load balancer: %v", err)
 	}
 
+	// Create router
+	mux := http.NewServeMux()
+	mux.HandleFunc("/metrics", metrics.NewHandler(servers))
+	mux.Handle("/", lb)
+
 	// Create HTTP server
 	httpServer := &http.Server{
 		Addr:    ":8080",
-		Handler: middleware.Recovery(lb),
+		Handler: middleware.Recovery(mux),
 	}
 
 	// Start NebulaGate

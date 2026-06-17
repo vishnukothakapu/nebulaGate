@@ -11,6 +11,8 @@ type Server struct {
 	URL          string                 `json:"url"`
 	Alive        bool                   `json:"-"`
 	ReverseProxy *httputil.ReverseProxy `json:"-"`
+
+	Requests uint64
 }
 
 // SetupProxy parses the server URL and creates a reverse proxy for it.

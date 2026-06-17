@@ -6,8 +6,20 @@ import (
 	"net/http"
 	"sync/atomic"
 
+	"github.com/SaisrikarVollala/nebulagate/internal/metrics"
 	"github.com/SaisrikarVollala/nebulagate/internal/server"
 )
+
+// ResponseWriter wraps http.ResponseWriter to capture the status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
 
 // LoadBalancer distributes incoming HTTP requests across backend servers
 // using the Round Robin algorithm.
@@ -66,16 +78,33 @@ func (lb *LoadBalancer) getNextServer() *server.Server {
 // This makes LoadBalancer usable directly as an HTTP server handler.
 // For each incoming request, it picks the next server and forwards the request.
 func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Track total requests
+	metrics.GlobalMetrics.IncTotal()
+
 	srv := lb.getNextServer()
 	if srv == nil {
 		http.Error(w, "Service Unavailable: all backend servers are down", http.StatusServiceUnavailable)
+		metrics.GlobalMetrics.IncFailed()
 		return
 	}
 
 	log.Printf("Forwarding request %s %s → %s (%s)", r.Method, r.URL.Path, srv.URL, srv.ID)
 
+	// Track request to this backend server
+	atomic.AddUint64(&srv.Requests, 1)
+
+	// Wrap the response writer to capture status code
+	wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
 	// Delegate to the server's reverse proxy, which handles:
 	// - Forwarding the request (method, headers, body) to the backend
 	// - Streaming the response back to the client
-	srv.ReverseProxy.ServeHTTP(w, r)
+	srv.ReverseProxy.ServeHTTP(wrapped, r)
+
+	// Track success/failed based on status code
+	if wrapped.statusCode >= 400 {
+		metrics.GlobalMetrics.IncFailed()
+	} else {
+		metrics.GlobalMetrics.IncSuccess()
+	}
 }
